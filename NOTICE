@@ -1,0 +1,26 @@
+ibkr-framework
+Copyright (c) 2026 Daniel Damiao
+
+Licensed under the MIT License (see LICENSE).
+
+-------------------------------------------------------------------------------
+Disclaimer
+-------------------------------------------------------------------------------
+
+This project is NOT affiliated with, endorsed by, or sponsored by Interactive
+Brokers LLC. "Interactive Brokers", "TWS", and "IB Gateway" are trademarks of
+their respective owners.
+
+This software connects to a live brokerage API and can place real orders.
+Trading involves substantial risk of loss. Use it entirely at your own risk;
+the author accepts no liability. Always test against a PAPER account first.
+
+-------------------------------------------------------------------------------
+Third-party
+-------------------------------------------------------------------------------
+
+ibapi
+  The official Interactive Brokers TWS API Python client. It is distributed by
+  Interactive Brokers under its own license and must be installed separately
+  (from the IBKR TWS API package, or via `pip install ibapi`). Tested with
+  ibapi 10.37.2. This framework is an independent wrapper around it.

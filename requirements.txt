@@ -1,0 +1,5 @@
+# The official Interactive Brokers TWS API client. Distributed by IBKR; also on
+# PyPI as `ibapi`. Tested with 10.37.2. Requires TWS or IB Gateway running.
+ibapi
+
+pandas

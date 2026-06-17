@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Runtime output / state / logs (root-anchored so package dirs are not ignored)
+/logs/
+/state/
+/cache/
+/outputs/
+*.log
+
+# env
+.env
+.venv/
+venv/
+.DS_Store

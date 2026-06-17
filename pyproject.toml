@@ -1,0 +1,22 @@
+[project]
+name = "ibkr-framework"
+version = "0.1.0"
+description = "A lightweight Interactive Brokers (TWS API) trading framework: connect, read account state, and place and manage orders, built on the official ibapi package."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Daniel Damiao" }]
+dependencies = ["ibapi", "pandas"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ibkr*"]
+
+[tool.ruff]
+line-length = 88
