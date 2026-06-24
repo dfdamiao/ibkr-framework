@@ -54,8 +54,8 @@ CRITICAL_CODES: frozenset[int] = frozenset({
     504,   # Not connected
     509,   # Exception reading socket
     1100,  # Connectivity broken
-    10147,  # OrderId already in use
-    10148,  # OrderId not current
+    10147,  # OrderId to cancel not found (cancel-failure, not dup id)
+    10148,  # OrderId to cancel not in a cancelable state (cancel-failure)
 })
 
 # --- Normal cancel response ---
@@ -115,5 +115,11 @@ def should_retry(error_code: int) -> bool:
 
 
 def is_duplicate_order_id(error_code: int) -> bool:
-    """Check if error means we need a fresh nextValidId."""
-    return error_code in (103, 10147, 10148)
+    """Check if error means we need a fresh nextValidId.
+
+    Only 103 (duplicate order id) qualifies. 10147/10148 are cancel-failures
+    (cancel target not found / not cancelable) — a fresh nextValidId does not
+    help, so including them logged a misleading 'Need fresh nextValidId' on
+    every failed STP cancel.
+    """
+    return error_code == 103
