@@ -14,9 +14,11 @@ Reference: the IBKR TWS API documentation Section 17.2
 
 import json
 import logging
+import os
 import time
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 from ibapi.order_cancel import OrderCancel
 
@@ -34,8 +36,33 @@ logger = logging.getLogger(__name__)
 # Time between order submissions in Phase 1 & 2
 ORDER_SUBMIT_DELAY = 5.0
 
-# Maximum age of a signal before it's considered stale (1 trading day)
-STALE_SIGNAL_DAYS = 1
+# Maximum age of a signal before it's considered stale (1 trading day).
+# Env-overridable for intentional catch-up runs (e.g. executing Friday's signals
+# on a Sunday); default preserves the original 1-day guard.
+STALE_SIGNAL_DAYS = int(os.environ.get("IBKR_STALE_SIGNAL_DAYS", "1"))
+
+
+def _stale_signal_mask(
+    dates: pd.Series, today: pd.Timestamp, max_trading_days: int
+) -> pd.Series:
+    """Boolean mask: True where a signal is stale — more than ``max_trading_days``
+    trading days (Mon-Fri) elapsed between the signal date and ``today``.
+
+    Counts trading days, not calendar days, so weekend gaps don't age a signal: a
+    Friday signal stays fresh through the next trading day (executing Friday's
+    signal on Monday is 1 trading day, not 3). Holidays are treated as trading
+    days (conservative — never keeps a genuinely-stale signal). Unparseable dates
+    (NaT) are never flagged stale (kept for review).
+    """
+    d = pd.to_datetime(dates, errors="coerce")
+    mask = pd.Series(False, index=d.index)
+    valid = d.notna()
+    if valid.any():
+        begin = d[valid].dt.normalize().to_numpy().astype("datetime64[D]")
+        end = np.datetime64(pd.Timestamp(today).normalize().date(), "D")
+        elapsed = np.busday_count(begin, end)
+        mask.loc[valid] = elapsed > max_trading_days
+    return mask
 
 
 class BaseExecutor:
@@ -81,11 +108,9 @@ class BaseExecutor:
     def run(self) -> None:
         """Execute the full pipeline: connect → load → execute → save."""
         setup_logging(self.config.name, self.config.log_dir)
-        logger.info(f"{'='*60}")
-        logger.info(
-            f"EXECUTOR: {self.config.name} " f"(client_id={self.config.client_id})"
-        )
-        logger.info(f"{'='*60}")
+        logger.info(f"{'=' * 60}")
+        logger.info(f"EXECUTOR: {self.config.name} (client_id={self.config.client_id})")
+        logger.info(f"{'=' * 60}")
 
         # HOLD guard — refuse to execute when portfolio_state.json::hold.active
         # is true. Set by the 2026-05-17 lockdown pending DSR re-cohort regen
@@ -120,16 +145,16 @@ class BaseExecutor:
 
             # Phase 1: Submit EXIT orders
             if not exits.empty:
-                logger.info(f"\n{'='*40}")
+                logger.info(f"\n{'=' * 40}")
                 logger.info("PHASE 1: EXIT ORDERS")
-                logger.info(f"{'='*40}")
+                logger.info(f"{'=' * 40}")
                 self._execute_exits(exits)
 
             # Phase 2: Submit ENTRY orders
             if not entries.empty:
-                logger.info(f"\n{'='*40}")
+                logger.info(f"\n{'=' * 40}")
                 logger.info("PHASE 2: ENTRY ORDERS")
-                logger.info(f"{'='*40}")
+                logger.info(f"{'=' * 40}")
                 self._execute_entries(entries)
                 # Persist entry_perm_id NOW, before the long monitor: if the
                 # process is killed mid-monitor (e.g. launcher timeout) the
@@ -143,9 +168,9 @@ class BaseExecutor:
                 oid for oid, _ in self.entry_order_ids
             ]
             if all_order_ids:
-                logger.info(f"\n{'='*40}")
+                logger.info(f"\n{'=' * 40}")
                 logger.info("PHASE 3: MONITORING ORDERS")
-                logger.info(f"{'='*40}")
+                logger.info(f"{'=' * 40}")
                 results = self.monitor.monitor_all(all_order_ids)
                 self._process_results(results)
 
@@ -158,9 +183,9 @@ class BaseExecutor:
         finally:
             if self.conn:
                 self.conn.disconnect_gracefully()
-            logger.info(f"\n{'='*60}")
+            logger.info(f"\n{'=' * 60}")
             logger.info("EXECUTOR COMPLETE")
-            logger.info(f"{'='*60}")
+            logger.info(f"{'=' * 60}")
 
     # ------------------------------------------------------------------
     # Hold guard
@@ -230,6 +255,17 @@ class BaseExecutor:
             return pd.DataFrame()
 
         df = pd.read_csv(path)
+        # A MultiIndex parse means the on-disk header has FEWER fields than the
+        # data rows (schema drift): pandas consumes the surplus leading fields as
+        # an index and scatters the real columns — e.g. 'status' lands on NaN, so
+        # the PENDING filter below silently yields 0 rows. Fail loud.
+        if df.index.nlevels > 1:
+            raise ValueError(
+                f"{path}: parsed into a {df.index.nlevels}-level MultiIndex — "
+                f"the header ({len(df.columns)} named cols) has fewer fields "
+                f"than the data rows (schema drift). Refusing to execute "
+                f"mis-parsed signals; correct the header to the generator schema."
+            )
         if df.empty:
             return df
 
@@ -246,19 +282,16 @@ class BaseExecutor:
             return pd.DataFrame()
         df = df[df["status"] == "PENDING"].copy()
 
-        # Filter stale signals (> 1 trading day old)
+        # Filter stale signals (> STALE_SIGNAL_DAYS trading days old)
         if "date" in df.columns:
-            cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(
-                days=STALE_SIGNAL_DAYS
+            stale = _stale_signal_mask(
+                df["date"], pd.Timestamp.now().normalize(), STALE_SIGNAL_DAYS
             )
-            dates = pd.to_datetime(df["date"], errors="coerce")
-            stale = dates < cutoff
             if stale.any():
                 for _, row in df[stale].iterrows():
                     asset = row.get(self.config.signal_column, "unknown")
                     logger.warning(
-                        f"⚠️ STALE signal skipped: {asset} "
-                        f"from {row.get('date', '?')}"
+                        f"⚠️ STALE signal skipped: {asset} from {row.get('date', '?')}"
                     )
                 df = df[~stale]
 

@@ -68,6 +68,11 @@ class ConnectionManager(EWrapper, EClient):
         EClient.__init__(self, self)
         self.host = host
         self.port = port
+        # ibapi's EClient.disconnect()/reset() nulls self.host/self.port, so a
+        # reconnect attempt would pass None ("str, bytes or bytearray expected,
+        # not NoneType"). Keep a stable copy that survives disconnects.
+        self._host = host
+        self._port = port
 
         # Connection state
         self.connected = False
@@ -92,7 +97,7 @@ class ConnectionManager(EWrapper, EClient):
         self.position_pnl: dict[int, dict] = {}
 
         # Portfolio updates (from reqAccountUpdates)
-        self.portfolio: dict[int, dict] = {}
+        self._portfolio: dict[int, dict] = {}
 
         # Execution tracking
         self.executions: dict[str, dict] = {}  # execId -> execution data
@@ -150,7 +155,7 @@ class ConnectionManager(EWrapper, EClient):
         # Socket pre-check — avoid hanging on connect()
         if not self._check_port():
             logger.error(
-                f"TWS not listening on {self.host}:{self.port}. "
+                f"TWS not listening on {self._host}:{self._port}. "
                 "Is Trader Workstation running?"
             )
             return False
@@ -163,10 +168,10 @@ class ConnectionManager(EWrapper, EClient):
 
                 logger.info(
                     f"Connecting to TWS (attempt {attempt}/{max_attempts}) "
-                    f"host={self.host} port={self.port} clientId={client_id}"
+                    f"host={self._host} port={self._port} clientId={client_id}"
                 )
 
-                self.connect(self.host, self.port, client_id)
+                self.connect(self._host, self._port, client_id)
 
                 # Start reader thread (daemon so it dies with main thread)
                 self._api_thread = threading.Thread(
@@ -229,7 +234,7 @@ class ConnectionManager(EWrapper, EClient):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
-            result = sock.connect_ex((self.host, self.port))
+            result = sock.connect_ex((self._host, self._port))
             sock.close()
             return result == 0
         except Exception:
@@ -868,7 +873,7 @@ class ConnectionManager(EWrapper, EClient):
         accountName: str,
     ) -> None:
         """Called for portfolio updates (reqAccountUpdates)."""
-        self.portfolio[contract.conId] = {
+        self._portfolio[contract.conId] = {
             "symbol": contract.symbol,
             "position": position,
             "marketPrice": marketPrice,
@@ -942,7 +947,7 @@ class ConnectionManager(EWrapper, EClient):
             (pi.lowEdge, pi.increment) for pi in priceIncrements
         ]
         logger.debug(
-            f"marketRule {marketRuleId}: " f"{len(priceIncrements)} price increments"
+            f"marketRule {marketRuleId}: {len(priceIncrements)} price increments"
         )
         self._market_rule_event.set()
 
